@@ -1,0 +1,4 @@
+.utilities/
+node_modules/
+dist/
+.env
