@@ -8,7 +8,7 @@ import { resumeCommand } from './resume';
 import { volumeCommand } from './volume';
 import { playlistCommand } from './playlist';
 
-const commands: Record<string, (i: ChatInputCommandInteraction) => Promise<void>> = {
+export const commands: Record<string, (i: ChatInputCommandInteraction) => Promise<void>> = {
   play: playCommand.execute.bind(playCommand),
   skip: skipCommand.execute.bind(skipCommand),
   stop: stopCommand.execute.bind(stopCommand),

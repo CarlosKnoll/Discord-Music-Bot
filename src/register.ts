@@ -12,35 +12,46 @@ import { playlistCommand } from './commands/playlist';
 dotenv.config();
 
 const commands = [
-    playCommand.data,
-    skipCommand.data,
-    stopCommand.data,
-    queueCommand.data,
-    pauseCommand.data,
-    resumeCommand.data,
-    volumeCommand.data,
-    playlistCommand.data,
-
+  playCommand.data,
+  skipCommand.data,
+  stopCommand.data,
+  queueCommand.data,
+  pauseCommand.data,
+  resumeCommand.data,
+  volumeCommand.data,
+  playlistCommand.data,
 ].map(cmd => cmd.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN!);
+const mode = process.argv[2]; // 'guild' | 'global'
 
 (async () => {
   try {
-    console.log('Registering slash commands...');
-    // Dev version: Guild-specific so changes are instant, but only works in the GUILD_ID server.
-    // await rest.put(
-    //   Routes.applicationGuildCommands(
-    //     process.env.CLIENT_ID!,
-    //     process.env.GUILD_ID!
-    //   ),
-    //   { body: commands }
-    // );
-    // Final version: Global registers so it can work in multiple servers.
-    await rest.put(
+    if (mode === 'global') {
+      console.log('Clearing guild commands...');
+      await rest.put(
+        Routes.applicationGuildCommands(process.env.CLIENT_ID!, process.env.GUILD_ID!),
+        { body: [] }
+      );
+      console.log('Registering commands globally...');
+      await rest.put(
         Routes.applicationCommands(process.env.CLIENT_ID!),
         { body: commands }
+      );
+    } else if (mode === 'cleanup') {
+    console.log('Clearing guild commands...');
+    await rest.put(
+      Routes.applicationGuildCommands(process.env.CLIENT_ID!, process.env.GUILD_ID!),
+      { body: [] }
     );
+    console.log('✅ Guild commands cleared.');
+    } else {
+      console.log('Registering commands to guild...');
+      await rest.put(
+        Routes.applicationGuildCommands(process.env.CLIENT_ID!, process.env.GUILD_ID!),
+        { body: commands }
+      );
+    }
     console.log('✅ Commands registered.');
   } catch (err) {
     console.error(err);

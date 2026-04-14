@@ -7,7 +7,9 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
-    "deploy": "ts-node src/register.ts && tsc && pm2 restart music-bot"
+    "deploy": "ts-node src/register.ts global && tsc && pm2 restart music-bot",
+    "deploy:guild": "ts-node src/register.ts guild && tsc && pm2 restart music-bot",
+    "cleanup:guild": "ts-node src/register.ts cleanup"
   },
   "keywords": [],
   "author": "",
