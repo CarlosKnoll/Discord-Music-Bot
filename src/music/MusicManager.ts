@@ -20,10 +20,12 @@ interface GuildMusicState {
   currentTrack: TrackInfo | null;
   queue: TrackInfo[];
   currentFfmpeg: ReturnType<typeof import('child_process').spawn> | null;
+  idleTimer: ReturnType<typeof setTimeout> | null;
 }
 
 const guildStates = new Map<string, GuildMusicState>();
 
+const IDLE_TIMEOUT_MS = 1000; // 1 second
 // ─── Internal: play the next track in queue ───────────────────────────────────
 
 async function playNext(guildId: string): Promise<void> {
@@ -39,9 +41,11 @@ async function playNext(guildId: string): Promise<void> {
 
   if (!next) {
     state.currentTrack = null;
+    scheduleIdleLeave(guildId);
     return;
   }
 
+  cancelIdleLeave(guildId);
   const ready = await ensureStreamUrl(next);
   const { resource, ffmpeg } = createStream(ready.streamUrl, state.volume);
   state.currentTrack = ready;
@@ -105,6 +109,7 @@ export async function joinChannel(
     currentTrack: null,
     queue: [],
     currentFfmpeg: null,
+    idleTimer: null,
   });
 }
 
@@ -112,6 +117,8 @@ export async function joinChannel(
 export async function enqueue(guildId: string, track: TrackInfo): Promise<'playing' | 'queued'> {
   const state = guildStates.get(guildId);
   if (!state) throw new Error('Bot is not in a voice channel.');
+
+  cancelIdleLeave(guildId);
 
   if (state.currentTrack === null && state.queue.length === 0) {
     const ready = await ensureStreamUrl(track);
@@ -139,6 +146,8 @@ export function skip(guildId: string): TrackInfo | null {
 export function stop(guildId: string): void {
   const state = guildStates.get(guildId);
   if (!state) return;
+
+  cancelIdleLeave(guildId);
 
   if (state.currentFfmpeg) {
     state.currentFfmpeg.kill('SIGKILL');
@@ -227,4 +236,28 @@ async function ensureStreamUrl(track: TrackInfo): Promise<TrackInfo> {
   track.streamUrl = fresh.streamUrl;
   track.prefetched = true;
   return track;
+}
+
+function scheduleIdleLeave(guildId: string): void {
+  const state = guildStates.get(guildId);
+  if (!state) return;
+
+  // Clear any existing timer first
+  if (state.idleTimer) {
+    clearTimeout(state.idleTimer);
+    state.idleTimer = null;
+  }
+
+  state.idleTimer = setTimeout(() => {
+    console.log(`[Idle] No activity for ${IDLE_TIMEOUT_MS / 1000}s in guild ${guildId}, leaving.`);
+    leaveChannel(guildId);
+  }, IDLE_TIMEOUT_MS);
+}
+
+function cancelIdleLeave(guildId: string): void {
+  const state = guildStates.get(guildId);
+  if (!state?.idleTimer) return;
+
+  clearTimeout(state.idleTimer);
+  state.idleTimer = null;
 }
