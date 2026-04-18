@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as dotenv from 'dotenv';
 import { Guild, VoiceBasedChannel } from 'discord.js';
 import { joinChannel, enqueue, setMode } from './MusicManager';
-import { resolve } from './YtdlpExtractor';
+import { resolve, TrackInfo } from './YtdlpExtractor';
 
 dotenv.config();
 
@@ -13,6 +13,7 @@ interface JukeboxGuildState {
   pool: string[];
   consumed: Set<string>;
   ambientEnabled: boolean;
+  playlistActive: boolean;  // ← new
 }
 
 const guildStates = new Map<string, JukeboxGuildState>();
@@ -23,6 +24,7 @@ function getOrCreate(guildId: string): JukeboxGuildState {
       pool: [],
       consumed: new Set(),
       ambientEnabled: false,
+      playlistActive: false,  // ← new
     });
   }
   return guildStates.get(guildId)!;
@@ -73,7 +75,9 @@ export async function updatePool(guildId: string): Promise<number> {
 export async function silentReload(guildId: string): Promise<void> {
   const state = getOrCreate(guildId);
   const fresh = await fetchFromSheet();
-  state.pool = fresh.filter(u => !state.consumed.has(u));
+  // Clear consumed so ambient has a full pool again
+  state.consumed.clear();
+  state.pool = fresh;
   console.log(`[Jukebox:${guildId}] Silent reload: ${state.pool.length} URLs available for ambient.`);
 }
 
@@ -84,6 +88,15 @@ export function pickRandom(guildId: string): string | null {
   const index = Math.floor(Math.random() * state.pool.length);
   const [url] = state.pool.splice(index, 1);
   state.consumed.add(url);
+
+  // Pool just emptied — silently reload so ambient keeps working
+  if (state.pool.length === 0) {
+    console.log(`[Jukebox:${guildId}] Pool exhausted by ambient, scheduling reload.`);
+    silentReload(guildId).catch(err =>
+      console.warn(`[Jukebox:${guildId}] Silent reload failed:`, err)
+    );
+  }
+
   return url;
 }
 
@@ -132,5 +145,36 @@ export async function triggerAmbient(
     console.log(`[Jukebox:${guild.id}] Ambient playing: ${track.title}`);
   } catch (err) {
     console.error(`[Jukebox:${guild.id}] Ambient trigger failed:`, err);
+  }
+}
+
+export function isPlaylistActive(guildId: string): boolean {
+  return getOrCreate(guildId).playlistActive;
+}
+
+export function setPlaylistActive(guildId: string, value: boolean): void {
+  getOrCreate(guildId).playlistActive = value;
+}
+
+export async function enrichQueue(queue: TrackInfo[]): Promise<void> {
+  const BATCH_SIZE = 3;
+
+  for (let i = 0; i < queue.length; i += BATCH_SIZE) {
+    const batch = queue.slice(i, i + BATCH_SIZE);
+    await Promise.all(
+      batch.map(async (track) => {
+        if (!track.title.startsWith('Track ')) return;
+        try {
+          const fresh = await resolve(track.url, track.requestedBy);
+          track.title = fresh.title;
+          track.duration = fresh.duration;
+          track.thumbnail = fresh.thumbnail;
+          track.streamUrl = fresh.streamUrl;
+          track.prefetched = true;
+        } catch (err) {
+          console.warn(`[Jukebox] Failed to enrich ${track.url}: ${err}`);
+        }
+      })
+    );
   }
 }

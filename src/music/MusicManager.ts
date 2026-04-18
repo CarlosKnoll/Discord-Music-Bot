@@ -46,6 +46,18 @@ async function playNext(guildId: string): Promise<void> {
   if (!next) {
     state.currentTrack = null;
     state.mode = 'idle';
+
+    // If jukebox playlist just finished, silently reload pool for ambient
+    // Import inline to avoid circular dependency
+    import('./JukeboxManager').then(({ isPlaylistActive, setPlaylistActive, silentReload }) => {
+      if (isPlaylistActive(guildId)) {
+        setPlaylistActive(guildId, false);
+        silentReload(guildId).then(() => {
+          console.log(`[Jukebox] Playlist finished. Pool reloaded for ambient.`);
+        });
+      }
+    });
+
     scheduleIdleLeave(guildId);
     return;
   }
@@ -199,6 +211,12 @@ export function leaveChannel(guildId: string): boolean {
   stop(guildId);
   connection.destroy();
   guildStates.delete(guildId);
+
+  // Reset jukebox playlist state so it can be restarted
+  import('./JukeboxManager').then(({ setPlaylistActive }) => {
+    setPlaylistActive(guildId, false);
+  });
+
   return true;
 }
 
