@@ -128,7 +128,7 @@ export async function triggerAmbient(
     await joinChannel(guild, channel);
     const track = await resolve(url, 'Jukebox');
     setMode(guild.id, 'jukebox');
-    await enqueue(guild.id, track);
+    await enqueue(guild.id, track, 'jukebox');  // ← pass origin
     console.log(`[Jukebox:${guild.id}] Ambient playing: ${track.title}`);
   } catch (err) {
     console.error(`[Jukebox:${guild.id}] Ambient trigger failed:`, err);

@@ -2,12 +2,13 @@ import ytdlp from 'yt-dlp-exec';
 
 export interface TrackInfo {
   title: string;
-  url: string;          // original YouTube URL
-  streamUrl: string;    // direct audio stream URL for FFmpeg
-  duration: number;     // in seconds
+  url: string;
+  streamUrl: string;
+  duration: number;
   thumbnail: string;
   requestedBy: string;
-  prefetched: boolean;
+  prefetched?: boolean;
+  origin?: 'user' | 'jukebox';  // ← add this
 }
 
 // Resolves a YouTube URL or search query into a TrackInfo object

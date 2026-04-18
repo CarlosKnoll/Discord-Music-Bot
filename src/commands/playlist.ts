@@ -51,7 +51,7 @@ export const playlistCommand = {
         resolve(firstVideoUrl, interaction.user.username),
       ]);
 
-      const status = await enqueue(interaction.guildId!, first);
+      const status = await enqueue(interaction.guildId!, first, 'user');
 
       await interaction.editReply(
         `📋 Playlist enfileirada: **${tracks.length} músicas**\n` +
@@ -64,7 +64,8 @@ export const playlistCommand = {
       const state = getState(interaction.guildId!);
       if (state) {
         for (let i = 1; i < tracks.length; i++) {
-          state.queue.push(tracks[i]);
+          tracks[i].origin = 'user';
+          state.userQueue.push(tracks[i]);
         }
       }
 

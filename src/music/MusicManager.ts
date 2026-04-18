@@ -20,21 +20,11 @@ interface GuildMusicState {
   channelId: string;
   volume: number;
   currentTrack: TrackInfo | null;
-  queue: TrackInfo[];
+  userQueue: TrackInfo[];
+  jukeboxQueue: TrackInfo[];
   currentFfmpeg: ReturnType<typeof import('child_process').spawn> | null;
   idleTimer: ReturnType<typeof setTimeout> | null;
   mode: BotMode;
-}
-
-interface GuildMusicState {
-  connection: VoiceConnection;
-  player: AudioPlayer;
-  channelId: string;
-  volume: number;
-  currentTrack: TrackInfo | null;
-  queue: TrackInfo[];
-  currentFfmpeg: ReturnType<typeof import('child_process').spawn> | null;
-  idleTimer: ReturnType<typeof setTimeout> | null;
 }
 
 const guildStates = new Map<string, GuildMusicState>();
@@ -51,7 +41,7 @@ async function playNext(guildId: string): Promise<void> {
     state.currentFfmpeg = null;
   }
 
-  const next = state.queue.shift();
+  const next = state.userQueue.shift() ?? state.jukeboxQueue.shift();
 
   if (!next) {
     state.currentTrack = null;
@@ -61,6 +51,7 @@ async function playNext(guildId: string): Promise<void> {
   }
 
   cancelIdleLeave(guildId);
+  state.mode = next.origin === 'jukebox' ? 'jukebox' : 'queue';
   const ready = await ensureStreamUrl(next);
   const { resource, ffmpeg } = createStream(ready.streamUrl, state.volume);
   state.currentTrack = ready;
@@ -122,7 +113,8 @@ export async function joinChannel(
     channelId: channel.id,
     volume: 1.0,
     currentTrack: null,
-    queue: [],
+    userQueue: [],
+    jukeboxQueue: [],
     currentFfmpeg: null,
     idleTimer: null,
     mode: 'idle',
@@ -130,13 +122,25 @@ export async function joinChannel(
 }
 
 // Adds a track to the queue. If nothing is playing, starts immediately.
-export async function enqueue(guildId: string, track: TrackInfo): Promise<'playing' | 'queued'> {
+export async function enqueue(
+  guildId: string,
+  track: TrackInfo,
+  target: 'user' | 'jukebox' = 'user'
+): Promise<'playing' | 'queued'> {
   const state = guildStates.get(guildId);
   if (!state) throw new Error('Bot is not in a voice channel.');
 
   cancelIdleLeave(guildId);
 
-  if (state.currentTrack === null && state.queue.length === 0) {
+  // Tag the track with its origin
+  track.origin = target;
+
+  const isIdle = state.currentTrack === null
+    && state.userQueue.length === 0
+    && state.jukeboxQueue.length === 0;
+
+  if (isIdle) {
+    state.mode = target === 'jukebox' ? 'jukebox' : 'queue';
     const ready = await ensureStreamUrl(track);
     const { resource, ffmpeg } = createStream(ready.streamUrl, state.volume);
     state.currentTrack = ready;
@@ -145,7 +149,18 @@ export async function enqueue(guildId: string, track: TrackInfo): Promise<'playi
     return 'playing';
   }
 
-  state.queue.push(track);
+  if (target === 'user') {
+    // If jukebox is currently playing, inject at front so it plays after current track
+    if (state.mode === 'jukebox') {
+      state.userQueue.unshift(track);
+    } else {
+      state.userQueue.push(track);
+    }
+    state.mode = 'queue';
+  } else {
+    state.jukeboxQueue.push(track);
+  }
+
   return 'queued';
 }
 
@@ -170,8 +185,10 @@ export function stop(guildId: string): void {
     state.currentFfmpeg = null;
   }
 
-  state.queue = [];
+  state.userQueue = [];
+  state.jukeboxQueue = [];
   state.currentTrack = null;
+  state.mode = 'idle';
   state.player.stop();
 }
 
@@ -225,23 +242,20 @@ export function setVolume(guildId: string, volume: number): boolean {
 // Fire-and-forget: resolves next track's stream URL while current one plays
 function prefetchNext(guildId: string): void {
   const state = guildStates.get(guildId);
-  if (!state || state.queue.length === 0) return;
+  if (!state) return;
 
-  const next = state.queue[0];
-  if (next.prefetched) return; // already done
+  const next = state.userQueue[0] ?? state.jukeboxQueue[0];
+  if (!next || next.prefetched) return;
 
-  // Re-resolve using the original YouTube URL to get a fresh stream URL
   import('./YtdlpExtractor').then(({ resolve }) => {
     resolve(next.url, next.requestedBy)
       .then((fresh) => {
-        // Patch the queued track's streamUrl in place
         next.streamUrl = fresh.streamUrl;
         next.prefetched = true;
         console.log(`[Prefetch] Ready: ${next.title}`);
       })
       .catch((err) => {
         console.warn(`[Prefetch] Failed for "${next.title}": ${err.message}`);
-        // Not fatal — playNext will try again when it actually plays
       });
   });
 }
@@ -294,4 +308,18 @@ export function isActive(guildId: string): boolean {
   const state = guildStates.get(guildId);
   if (!state) return false;
   return state.mode !== 'idle' || state.currentTrack !== null;
+}
+
+export function clearJukeboxQueue(guildId: string): void {
+  const state = guildStates.get(guildId);
+  if (!state) return;
+  state.jukeboxQueue = [];
+}
+
+export function getQueueLengths(guildId: string): { user: number; jukebox: number } {
+  const state = guildStates.get(guildId);
+  return {
+    user: state?.userQueue.length ?? 0,
+    jukebox: state?.jukeboxQueue.length ?? 0,
+  };
 }

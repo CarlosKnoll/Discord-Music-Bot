@@ -5,31 +5,43 @@ import { formatDuration } from '../music/YtdlpExtractor';
 export const queueCommand = {
   data: new SlashCommandBuilder()
     .setName('queue')
-    .setDescription('Mostra a fila atual'),
+    .setDescription('Show the current queue'),
 
   async execute(interaction: ChatInputCommandInteraction) {
     const state = getState(interaction.guildId!);
 
     if (!state || !state.currentTrack) {
-      await interaction.reply({ content: '❌ Nada está sendo reproduzido.', ephemeral: true });
+      await interaction.reply({ content: '❌ Nothing is playing.', ephemeral: true });
       return;
     }
 
+    const origin = state.currentTrack.origin === 'jukebox' ? '🎲 Jukebox' : '👤 Requested';
     const lines: string[] = [
-      `▶️ **Tocando:** ${state.currentTrack.title} (${formatDuration(state.currentTrack.duration)}) — ${state.currentTrack.requestedBy}`,
+      `▶️ **Now playing** [${origin}]: ${state.currentTrack.title} (${formatDuration(state.currentTrack.duration)}) — ${state.currentTrack.requestedBy}`,
     ];
 
-    if (state.queue.length === 0) {
-      lines.push('\n*Nenhuma música na fila.*');
-    } else {
-      lines.push('\n**Próximas:**');
-      state.queue.slice(0, 10).forEach((track, i) => {
+    if (state.userQueue.length > 0) {
+      lines.push('\n**Requested tracks:**');
+      state.userQueue.slice(0, 10).forEach((track, i) => {
         lines.push(`${i + 1}. ${track.title} (${formatDuration(track.duration)}) — ${track.requestedBy}`);
       });
-
-      if (state.queue.length > 10) {
-        lines.push(`\n*...e ${state.queue.length - 10} mais.*`);
+      if (state.userQueue.length > 10) {
+        lines.push(`*...and ${state.userQueue.length - 10} more.*`);
       }
+    }
+
+    if (state.jukeboxQueue.length > 0) {
+      lines.push('\n**Jukebox queue:**');
+      state.jukeboxQueue.slice(0, 5).forEach((track, i) => {
+        lines.push(`${i + 1}. ${track.title} (${formatDuration(track.duration)})`);
+      });
+      if (state.jukeboxQueue.length > 5) {
+        lines.push(`*...and ${state.jukeboxQueue.length - 5} more.*`);
+      }
+    }
+
+    if (state.userQueue.length === 0 && state.jukeboxQueue.length === 0) {
+      lines.push('\n*No tracks queued.*');
     }
 
     await interaction.reply(lines.join('\n'));

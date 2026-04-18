@@ -31,19 +31,25 @@ export const playCommand = {
     try {
       await joinChannel(interaction.guild!, voiceChannel);
       const track = await resolve(query, interaction.user.username);
-      const status = await enqueue(interaction.guildId!, track);
+      const status = await enqueue(interaction.guildId!, track, 'user');
 
       if (status === 'playing') {
         await interaction.editReply(
-          `▶️ Tocando: **${track.title}**\n` +
-          `Duração: ${formatDuration(track.duration)} | Pedido por: ${track.requestedBy}`
+          `▶️ Now playing: **${track.title}**\n` +
+          `Duration: ${formatDuration(track.duration)} | Requested by: ${track.requestedBy}`
         );
       } else {
         const state = getState(interaction.guildId!)!;
-        const position = state.queue.length;
+        const position = state.userQueue.length;
+
+        // Inform user if it's jumping ahead of jukebox tracks
+        const jukeboxNote = state.mode === 'jukebox'
+          ? ' *(will play after current jukebox track)*'
+          : '';
+
         await interaction.editReply(
-          `➕ Adicionado à fila (#${position}): **${track.title}**\n` +
-          `Duração: ${formatDuration(track.duration)} | Pedido por: ${track.requestedBy}`
+          `➕ Added to queue (#${position}): **${track.title}**\n` +
+          `Duration: ${formatDuration(track.duration)} | Requested by: ${track.requestedBy}${jukeboxNote}`
         );
       }
     } catch (err) {
