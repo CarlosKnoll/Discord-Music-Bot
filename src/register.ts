@@ -30,11 +30,6 @@ const mode = process.argv[2]; // 'guild' | 'global'
 (async () => {
   try {
     if (mode === 'global') {
-      console.log('Clearing guild commands...');
-      await rest.put(
-        Routes.applicationGuildCommands(process.env.CLIENT_ID!, process.env.GUILD_ID!),
-        { body: [] }
-      );
       console.log('Registering commands globally...');
       await rest.put(
         Routes.applicationCommands(process.env.CLIENT_ID!),
