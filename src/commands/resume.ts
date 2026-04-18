@@ -4,7 +4,7 @@ import { resume } from '../music/MusicManager';
 export const resumeCommand = {
   data: new SlashCommandBuilder()
     .setName('resume')
-    .setDescription('Resume a música que está pausada atualmente'),
+    .setDescription('Retoma a música que está pausada atualmente'),
 
   async execute(interaction: ChatInputCommandInteraction) {
     const resumed = resume(interaction.guildId!);

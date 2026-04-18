@@ -19,31 +19,31 @@ import { GuildMember } from 'discord.js';
 export const jukeboxCommand = {
   data: new SlashCommandBuilder()
     .setName('jukebox')
-    .setDescription('Jukebox controls')
+    .setDescription('Controles da Jukebox')
     .addSubcommand(sub =>
       sub
         .setName('enable')
-        .setDescription('Enable ambient mode — bot auto-joins when users enter a voice channel')
+        .setDescription('Habilitar modo ambiente — o bot entra automaticamente quando os usuários entrarem em um canal de voz')
     )
     .addSubcommand(sub =>
       sub
         .setName('disable')
-        .setDescription('Disable ambient mode')
+        .setDescription('Desabilitar modo ambiente')
     )
     .addSubcommand(sub =>
       sub
         .setName('update')
-        .setDescription('Merge new URLs from the Google Sheet into the active pool')
+        .setDescription('Juntar novas URLs da planilha do Google na pool ativa')
     )
     .addSubcommand(sub =>
       sub
         .setName('playlist')
-        .setDescription('Queue the entire URL pool in random order')
+        .setDescription('Enfileira todo o pool de URLs em ordem aleatória')
     )
     .addSubcommand(sub =>
       sub
         .setName('stop')
-        .setDescription('Stop jukebox, clear jukebox queue, hand control back to user queue or idle')
+        .setDescription('Para o jukebox, limpa a fila do jukebox e devolve o controle para a fila do usuário ou para o modo ocioso')
     ),
 
   async execute(interaction: ChatInputCommandInteraction) {
@@ -53,7 +53,7 @@ export const jukeboxCommand = {
     if (sub === 'enable') {
       await interaction.deferReply();
       if (isAmbientEnabled(guildId)) {
-        await interaction.editReply('Ambient mode is already enabled.');
+        await interaction.editReply('❌ Modo ambiente já está ativado.');
         return;
       }
       setAmbientEnabled(guildId, true);
@@ -69,7 +69,7 @@ export const jukeboxCommand = {
       }
 
       await interaction.editReply(
-        `✅ Ambient mode enabled. Pool has **${total}** track${total !== 1 ? 's' : ''} available.`
+        `✅ Modo ambiente ativado. Pool tem **${total}** faixa${total !== 1 ? 's' : ''} disponível.`
       );
       return;
     }
@@ -77,14 +77,14 @@ export const jukeboxCommand = {
     if (sub === 'disable') {
       await interaction.deferReply();
       if (!isAmbientEnabled(guildId)) {
-        await interaction.editReply('Ambient mode is already disabled.');
+        await interaction.editReply('❌ Modo ambiente já está desativado.');
         return;
       }
 
       setAmbientEnabled(guildId, false);
       // Do NOT touch jukeboxQueue or playlistActive — playlist runs independently
 
-      await interaction.editReply('⏹️ Ambient mode disabled.');
+      await interaction.editReply('⏹️ Modo ambiente desativado.');
       return;
     }
 
@@ -94,16 +94,16 @@ export const jukeboxCommand = {
         const added = await updatePool(guildId);
         const total = getPoolSize(guildId);
         if (added === 0) {
-          await interaction.editReply('No new URLs found in the sheet.');
+          await interaction.editReply('❌ Nenhuma nova URL encontrada na planilha.');
           return;
         }
         await interaction.editReply(
-          `✅ Added **${added}** new URL${added !== 1 ? 's' : ''} to the pool. ` +
-          `Pool now has **${total}** track${total !== 1 ? 's' : ''}.`
+          `✅ Adicionadas **${added}** novas URLs ao pool. ` +
+          `Pool agora tem **${total}** faixa${total !== 1 ? 's' : ''}.`
         );
       } catch (err) {
         console.error('[Jukebox] Update failed:', err);
-        await interaction.editReply('❌ Failed to fetch from Google Sheet. Check console for details.');
+        await interaction.editReply('❌ Falha ao buscar na planilha do Google. Verifique os logs para detalhes.');
       }
       return;
     }
@@ -115,12 +115,12 @@ export const jukeboxCommand = {
       const voiceChannel = member.voice.channel;
 
       if (!voiceChannel) {
-        await interaction.editReply('❌ You need to be in a voice channel first.');
+        await interaction.editReply('❌ Você precisa estar em um canal de voz primeiro.');
         return;
       }
 
       if (isPlaylistActive(guildId)) {
-        await interaction.editReply('❌ Jukebox playlist is already running.');
+        await interaction.editReply('❌ Jukebox já está rodando.');
         return;
       }
 
@@ -129,7 +129,7 @@ export const jukeboxCommand = {
       const poolSize = getPoolSize(guildId);
       if (poolSize === 0) {
         await interaction.editReply(
-          '❌ No URLs found in the sheet.'
+          '❌ Nenhuma URL encontrada na planilha.'
         );
         return;
       }
@@ -154,10 +154,10 @@ export const jukeboxCommand = {
       const status = await enqueue(guildId, first, 'jukebox');
 
       await interaction.editReply(
-        `🎲 Jukebox playlist started — **${urls.length} tracks** queued.\n` +
-        `${status === 'playing' ? '▶️ Now playing' : '➕ Up next'}: **${first.title}** ` +
+        `🎲 Playlist da jukebox iniciada — **${urls.length} faixas** enfileiradas.\n` +
+        `${status === 'playing' ? '▶️ Tocando' : '➕ Próxima'}: **${first.title}** ` +
         `(${formatDuration(first.duration)})\n` +
-        `Queueing the rest in the background…`
+        `Enfileirando o restante em segundo plano…`
       );
 
       // Push remaining tracks directly into jukeboxQueue without resolving stream URLs
@@ -186,7 +186,7 @@ export const jukeboxCommand = {
       }
 
       await interaction.followUp({
-        content: `✅ All **${urls.length - 1}** remaining tracks queued.`,
+        content: `✅ Todas as **${urls.length - 1}** faixas restantes foram enfileiradas.`,
         ephemeral: false,
       });
 
@@ -198,7 +198,7 @@ export const jukeboxCommand = {
 
       const state = getState(guildId);
       if (!state) {
-        await interaction.editReply('❌ Bot is not active.');
+        await interaction.editReply('❌ Bot não está ativo.');
         return;
       }
 
@@ -215,10 +215,10 @@ export const jukeboxCommand = {
 
       if (lengths.user > 0) {
         await interaction.editReply(
-          `⏹️ Jukebox stopped. **${lengths.user}** requested track${lengths.user !== 1 ? 's' : ''} will continue.`
+          `⏹️ Jukebox interrompida. **${lengths.user}** faixas requiridas${lengths.user !== 1 ? 's' : ''} irão continuar.`
         );
       } else {
-        await interaction.editReply('⏹️ Jukebox stopped. Bot will go idle.');
+        await interaction.editReply('⏹️ Jukebox interrompida. Bot ficará ocioso.');
       }
       return;
     }

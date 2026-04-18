@@ -23,7 +23,7 @@ function getOrCreate(guildId: string): JukeboxGuildState {
     guildStates.set(guildId, {
       pool: [],
       consumed: new Set(),
-      ambientEnabled: false,
+      ambientEnabled: true,
       playlistActive: false,  // ← new
     });
   }

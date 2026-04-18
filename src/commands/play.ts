@@ -35,8 +35,8 @@ export const playCommand = {
 
       if (status === 'playing') {
         await interaction.editReply(
-          `▶️ Now playing: **${track.title}**\n` +
-          `Duration: ${formatDuration(track.duration)} | Requested by: ${track.requestedBy}`
+          `▶️ Tocando: **${track.title}**\n` +
+          `Duração: ${formatDuration(track.duration)} | Pedido por: ${track.requestedBy}`
         );
       } else {
         const state = getState(interaction.guildId!)!;
@@ -44,12 +44,12 @@ export const playCommand = {
 
         // Inform user if it's jumping ahead of jukebox tracks
         const jukeboxNote = state.mode === 'jukebox'
-          ? ' *(will play after current jukebox track)*'
+          ? ' *(vai tocar após a faixa atual da jukebox)*'
           : '';
 
         await interaction.editReply(
-          `➕ Added to queue (#${position}): **${track.title}**\n` +
-          `Duration: ${formatDuration(track.duration)} | Requested by: ${track.requestedBy}${jukeboxNote}`
+          `➕ Adicionada à fila (#${position}): **${track.title}**\n` +
+          `Duração: ${formatDuration(track.duration)} | Pedido por: ${track.requestedBy}${jukeboxNote}`
         );
       }
     } catch (err) {
