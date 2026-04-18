@@ -212,9 +212,11 @@ export function leaveChannel(guildId: string): boolean {
   connection.destroy();
   guildStates.delete(guildId);
 
-  // Reset jukebox playlist state so it can be restarted
-  import('./JukeboxManager').then(({ setPlaylistActive }) => {
+  import('./JukeboxManager').then(({ setPlaylistActive, loadPool }) => {
     setPlaylistActive(guildId, false);
+    loadPool(guildId).catch(err =>
+      console.warn(`[Jukebox:${guildId}] Reload on leave failed:`, err)
+    );
   });
 
   return true;

@@ -12,7 +12,7 @@ import {
   isPlaylistActive,
   setPlaylistActive,
 } from '../music/JukeboxManager';
-import { joinChannel, enqueue, getState } from '../music/MusicManager';
+import { joinChannel, enqueue, getState, stop, clearJukeboxQueue, getQueueLengths } from '../music/MusicManager';
 import { resolve, formatDuration } from '../music/YtdlpExtractor';
 import { GuildMember } from 'discord.js';
 
@@ -39,12 +39,11 @@ export const jukeboxCommand = {
       sub
         .setName('playlist')
         .setDescription('Queue the entire URL pool in random order')
-        .addBooleanOption(opt =>
-          opt
-            .setName('reload')
-            .setDescription('Fetch fresh URLs from the sheet before queueing')
-            .setRequired(false)
-        )
+    )
+    .addSubcommand(sub =>
+      sub
+        .setName('stop')
+        .setDescription('Stop jukebox, clear jukebox queue, hand control back to user queue or idle')
     ),
 
   async execute(interaction: ChatInputCommandInteraction) {
@@ -81,7 +80,10 @@ export const jukeboxCommand = {
         await interaction.editReply('Ambient mode is already disabled.');
         return;
       }
+
       setAmbientEnabled(guildId, false);
+      // Do NOT touch jukeboxQueue or playlistActive — playlist runs independently
+
       await interaction.editReply('⏹️ Ambient mode disabled.');
       return;
     }
@@ -122,25 +124,29 @@ export const jukeboxCommand = {
         return;
       }
 
-      const shouldReload = interaction.options.getBoolean('reload') ?? false;
-
-      if (shouldReload) {
-        await loadPool(guildId);
-      }
+      await loadPool(guildId);
 
       const poolSize = getPoolSize(guildId);
       if (poolSize === 0) {
         await interaction.editReply(
-          '❌ Pool is empty. Use `/jukebox playlist reload:True` to fetch fresh URLs.'
+          '❌ No URLs found in the sheet.'
         );
         return;
       }
 
-      // Drain pool into a shuffled array and mark playlist as active
-      const urls = drainPool(guildId);
-      setPlaylistActive(guildId, true);
-
       await joinChannel(interaction.guild!, voiceChannel);
+
+      // Capture currently playing jukebox track URL before reload
+      const state = getState(guildId);
+      const currentUrl = state?.currentTrack?.origin === 'jukebox'
+        ? state.currentTrack.url
+        : null;
+
+      await loadPool(guildId);
+
+      // Drain pool, excluding currently playing track to avoid duplication
+      const urls = drainPool(guildId).filter(u => u !== currentUrl);
+      setPlaylistActive(guildId, true);
 
       // Resolve and play the first track immediately
       const first = await resolve(urls[0], 'Jukebox');
@@ -156,7 +162,6 @@ export const jukeboxCommand = {
 
       // Push remaining tracks directly into jukeboxQueue without resolving stream URLs
       // ensureStreamUrl + prefetchNext handle lazy resolution as each track plays
-      const state = getState(guildId);
       if (state) {
         // Push remaining tracks as placeholders
         for (let i = 1; i < urls.length; i++) {
@@ -185,6 +190,36 @@ export const jukeboxCommand = {
         ephemeral: false,
       });
 
+      return;
+    }
+
+    if (sub === 'stop') {
+      await interaction.deferReply();
+
+      const state = getState(guildId);
+      if (!state) {
+        await interaction.editReply('❌ Bot is not active.');
+        return;
+      }
+
+      clearJukeboxQueue(guildId);
+      setPlaylistActive(guildId, false);
+
+      const lengths = getQueueLengths(guildId);
+
+      // Only stop current track if it's jukebox-originated
+      // If a user track is playing, let it finish — userQueue continues naturally
+      if (state.currentTrack?.origin === 'jukebox') {
+        state.player.stop(); // triggers Idle → playNext → picks from userQueue if any
+      }
+
+      if (lengths.user > 0) {
+        await interaction.editReply(
+          `⏹️ Jukebox stopped. **${lengths.user}** requested track${lengths.user !== 1 ? 's' : ''} will continue.`
+        );
+      } else {
+        await interaction.editReply('⏹️ Jukebox stopped. Bot will go idle.');
+      }
       return;
     }
   }
