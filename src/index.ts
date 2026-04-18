@@ -1,7 +1,8 @@
 import { Client, GatewayIntentBits, Interaction } from 'discord.js';
 import * as dotenv from 'dotenv';
 import { handleCommand } from './commands/handler';
-import { getState, leaveChannel } from './music/MusicManager';
+import { getState, leaveChannel, isActive } from './music/MusicManager';
+import { loadPool, isAmbientEnabled, triggerAmbient } from './music/JukeboxManager';
 
 dotenv.config();
 
@@ -21,8 +22,15 @@ const client = new Client({
   ],
 });
 
-client.once('ready', () => {
+client.once('ready', async () => {
   console.log(`✅ Logged in as ${client.user?.tag}`);
+  try {
+    for (const guild of client.guilds.cache.values()) {
+      await loadPool(guild.id);
+    }
+  } catch (err) {
+    console.warn('[Jukebox] Failed to load pool on startup:', err);
+  }
 });
 
 client.on('interactionCreate', async (interaction: Interaction) => {
@@ -30,20 +38,37 @@ client.on('interactionCreate', async (interaction: Interaction) => {
   await handleCommand(interaction);
 });
 
-client.on('voiceStateUpdate', (oldState, newState) => {
+client.on('voiceStateUpdate', async (oldState, newState) => {
   const guildId = oldState.guild.id;
+
+  // ── Empty channel auto-leave ──────────────────────────────────────────────
   const state = getState(guildId);
-  if (!state) return;
+  if (state) {
+    const botChannel = oldState.guild.members.me?.voice.channel;
+    if (botChannel) {
+      const humanMembers = botChannel.members.filter(m => !m.user.bot);
+      if (humanMembers.size === 0) {
+        console.log(`[Voice] Everyone left in guild ${guildId}, auto-leaving.`);
+        leaveChannel(guildId);
+        return;
+      }
+    }
+  }
 
-  // Get the channel the bot is currently in
-  const botChannel = oldState.guild.members.me?.voice.channel;
-  if (!botChannel) return;
+  // ── Ambient join trigger ──────────────────────────────────────────────────
+  const memberJoined = !oldState.channel && newState.channel;
+  const isHuman = !newState.member?.user.bot;
 
-  // If only the bot remains, leave
-  const humanMembers = botChannel.members.filter(m => !m.user.bot);
-  if (humanMembers.size === 0) {
-    console.log(`[Voice] Everyone left in guild ${guildId}, auto-leaving.`);
-    leaveChannel(guildId);
+  if (memberJoined && isHuman && isAmbientEnabled(guildId)) {
+    if (isActive(guildId)) {
+      console.log(`[Jukebox] Ambient suppressed — bot already active in guild ${guildId}.`);
+      return;
+    }
+    const channel = newState.channel;
+    if (channel) {
+      console.log(`[Jukebox] Ambient triggered by ${newState.member?.user.username} joining ${channel.name}`);
+      await triggerAmbient(newState.guild, channel);
+    }
   }
 });
 

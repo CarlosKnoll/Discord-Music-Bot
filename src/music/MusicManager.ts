@@ -12,6 +12,20 @@ import { Guild, VoiceBasedChannel } from 'discord.js';
 import { createStream } from './AudioStream';
 import { TrackInfo, resolve  } from './YtdlpExtractor';
 
+type BotMode = 'idle' | 'jukebox' | 'queue';
+
+interface GuildMusicState {
+  connection: VoiceConnection;
+  player: AudioPlayer;
+  channelId: string;
+  volume: number;
+  currentTrack: TrackInfo | null;
+  queue: TrackInfo[];
+  currentFfmpeg: ReturnType<typeof import('child_process').spawn> | null;
+  idleTimer: ReturnType<typeof setTimeout> | null;
+  mode: BotMode;
+}
+
 interface GuildMusicState {
   connection: VoiceConnection;
   player: AudioPlayer;
@@ -41,6 +55,7 @@ async function playNext(guildId: string): Promise<void> {
 
   if (!next) {
     state.currentTrack = null;
+    state.mode = 'idle';
     scheduleIdleLeave(guildId);
     return;
   }
@@ -110,6 +125,7 @@ export async function joinChannel(
     queue: [],
     currentFfmpeg: null,
     idleTimer: null,
+    mode: 'idle',
   });
 }
 
@@ -260,4 +276,22 @@ function cancelIdleLeave(guildId: string): void {
 
   clearTimeout(state.idleTimer);
   state.idleTimer = null;
+}
+
+export function setMode(guildId: string, mode: BotMode): void {
+  const state = guildStates.get(guildId);
+  if (!state) return;
+  state.mode = mode;
+}
+
+export function getMode(guildId: string): BotMode | null {
+  const state = guildStates.get(guildId);
+  return state?.mode ?? null;
+}
+
+// Returns true if the bot is connected and doing something in this guild
+export function isActive(guildId: string): boolean {
+  const state = guildStates.get(guildId);
+  if (!state) return false;
+  return state.mode !== 'idle' || state.currentTrack !== null;
 }

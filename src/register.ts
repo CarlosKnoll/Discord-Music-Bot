@@ -8,6 +8,7 @@ import { pauseCommand } from './commands/pause';
 import { resumeCommand } from './commands/resume';
 import { volumeCommand } from './commands/volume';
 import { playlistCommand } from './commands/playlist';
+import { jukeboxCommand } from './commands/jukebox';
 
 dotenv.config();
 
@@ -20,6 +21,7 @@ const commands = [
   resumeCommand.data,
   volumeCommand.data,
   playlistCommand.data,
+  jukeboxCommand.data,
 ].map(cmd => cmd.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN!);

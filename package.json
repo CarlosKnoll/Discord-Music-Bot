@@ -6,10 +6,10 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts",
-    "deploy": "ts-node src/register.ts global && tsc && pm2 restart music-bot",
-    "deploy:guild": "ts-node src/register.ts guild && tsc && pm2 restart music-bot",
-    "cleanup:guild": "ts-node src/register.ts cleanup"
+    "dev": "npxts-node src/index.ts",
+    "deploy": "npx ts-node src/register.ts global && tsc && pm2 restart music-bot",
+    "deploy:guild": "npx ts-node src/register.ts guild && tsc && pm2 restart music-bot",
+    "cleanup:guild": "npx ts-node src/register.ts cleanup"
   },
   "keywords": [],
   "author": "",
@@ -20,6 +20,7 @@
     "@discordjs/voice": "^0.19.2",
     "discord.js": "^14.26.2",
     "dotenv": "^17.4.2",
+    "googleapis": "^171.4.0",
     "sodium-native": "^5.1.0",
     "yt-dlp-exec": "^1.0.2"
   },

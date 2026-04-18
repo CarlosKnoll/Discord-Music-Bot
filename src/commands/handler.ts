@@ -7,6 +7,7 @@ import { pauseCommand } from './pause';
 import { resumeCommand } from './resume';
 import { volumeCommand } from './volume';
 import { playlistCommand } from './playlist';
+import { jukeboxCommand } from './jukebox';
 
 export const commands: Record<string, (i: ChatInputCommandInteraction) => Promise<void>> = {
   play: playCommand.execute.bind(playCommand),
@@ -17,6 +18,7 @@ export const commands: Record<string, (i: ChatInputCommandInteraction) => Promis
   resume: resumeCommand.execute.bind(resumeCommand),
   volume: volumeCommand.execute.bind(volumeCommand),
   playlist: playlistCommand.execute.bind(playlistCommand),
+  jukebox: jukeboxCommand.execute.bind(jukeboxCommand),
 
 };
 
