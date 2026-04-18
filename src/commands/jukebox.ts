@@ -43,7 +43,7 @@ export const jukeboxCommand = {
     .addSubcommand(sub =>
       sub
         .setName('stop')
-        .setDescription('Para o jukebox, limpa a fila do jukebox e devolve o controle para a fila do usuário ou para o modo ocioso')
+        .setDescription('Para a jukebox e devolve o controle para a fila do usuário.')
     ),
 
   async execute(interaction: ChatInputCommandInteraction) {
