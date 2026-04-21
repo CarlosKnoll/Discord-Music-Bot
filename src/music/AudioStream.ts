@@ -15,7 +15,8 @@ export function createStream(streamUrl: string, volume: number = 1.0): AudioStre
   const ffmpegArgs = [
     '-reconnect', '1',
     '-reconnect_streamed', '1',
-    '-reconnect_delay_max', '5',
+    '-reconnect_on_network_error', '1',
+    '-reconnect_delay_max', '10',
     '-i', streamUrl,
     '-af', `dynaudnorm=g=5:f=250:r=0.9:p=0.7,volume=${volume}`,
     '-vn',

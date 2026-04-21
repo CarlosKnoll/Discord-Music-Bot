@@ -2,7 +2,7 @@ import { google } from 'googleapis';
 import * as path from 'path';
 import * as dotenv from 'dotenv';
 import { Guild, VoiceBasedChannel } from 'discord.js';
-import { joinChannel, enqueue, setMode } from './MusicManager';
+import { joinChannel, enqueue, setMode, leaveChannel } from './MusicManager';
 import { resolve, TrackInfo } from './YtdlpExtractor';
 
 dotenv.config();
@@ -141,10 +141,17 @@ export async function triggerAmbient(
     await joinChannel(guild, channel);
     const track = await resolve(url, 'Jukebox');
     setMode(guild.id, 'jukebox');
-    await enqueue(guild.id, track, 'jukebox');  // ← pass origin
+    await enqueue(guild.id, track, 'jukebox');
     console.log(`[Jukebox:${guild.id}] Ambient playing: ${track.title}`);
   } catch (err) {
     console.error(`[Jukebox:${guild.id}] Ambient trigger failed:`, err);
+    // Clean up — leave the channel so the bot doesn't get stuck
+    leaveChannel(guild.id);
+    // URL was already consumed by pickRandom — put it back if it was a transient error
+    // so it gets another chance on the next trigger
+    const state = getOrCreate(guild.id);
+    state.consumed.delete(url);
+    state.pool.push(url);
   }
 }
 
