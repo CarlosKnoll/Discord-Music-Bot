@@ -24,12 +24,17 @@ const client = new Client({
 
 client.once('ready', async () => {
   console.log(`✅ Logged in as ${client.user?.tag}`);
-  try {
-    for (const guild of client.guilds.cache.values()) {
-      await loadPool(guild.id);
+
+  for (const guild of client.guilds.cache.values()) {
+    while (true) {
+      try {
+        await loadPool(guild.id);
+        break;
+      } catch (err) {
+        console.warn(`[Jukebox] Pool load failed, retrying in 15s...`);
+        await new Promise(res => setTimeout(res, 15_000));
+      }
     }
-  } catch (err) {
-    console.warn('[Jukebox] Failed to load pool on startup:', err);
   }
 });
 

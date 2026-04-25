@@ -130,6 +130,17 @@ export async function triggerAmbient(
   guild: Guild,
   channel: VoiceBasedChannel
 ): Promise<void> {
+  // If pool is empty, attempt a reload before giving up
+  if (getPoolSize(guild.id) === 0) {
+    console.log(`[Jukebox:${guild.id}] Pool empty on ambient trigger, attempting reload.`);
+    try {
+      await loadPool(guild.id);
+    } catch (err) {
+      console.error(`[Jukebox:${guild.id}] Pool reload failed on ambient trigger:`, err);
+      return;
+    }
+  }
+
   const url = pickRandom(guild.id);
 
   if (!url) {
@@ -145,10 +156,7 @@ export async function triggerAmbient(
     console.log(`[Jukebox:${guild.id}] Ambient playing: ${track.title}`);
   } catch (err) {
     console.error(`[Jukebox:${guild.id}] Ambient trigger failed:`, err);
-    // Clean up — leave the channel so the bot doesn't get stuck
     leaveChannel(guild.id);
-    // URL was already consumed by pickRandom — put it back if it was a transient error
-    // so it gets another chance on the next trigger
     const state = getOrCreate(guild.id);
     state.consumed.delete(url);
     state.pool.push(url);
