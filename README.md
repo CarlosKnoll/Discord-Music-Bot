@@ -18,12 +18,13 @@
 
 ### Jukebox:
  
-- **Ambient mode** — bot auto-joins a voice channel when anyone enters and plays a random track from a collaborative Google Sheet URL pool, then leaves when done
-- **Playlist mode** — queues the entire URL pool in random order via `/jukebox playlist`, draining it without repeats
+- **Ambient mode** — bot auto-joins a voice channel when anyone enters and plays the next track from a shuffled pool sourced from a collaborative Google Sheet, then leaves when done
+- **Playlist mode** — queues the entire remaining pool in shuffle order via `/jukebox playlist`, draining it without repeats
 - **Two-queue priority system** — user requests via `/play` always take priority over jukebox tracks; both queues coexist without interference
 - **Collaborative pool** — URL pool is sourced from a shared Google Sheet; any member can add links and `/jukebox update` merges new entries without restoring already-played URLs
 - **Per-guild isolation** — pool state, consumed URL tracking, and ambient toggle are fully independent per server
-- **Automatic pool reload** — pool replenishes itself after playlist drains or ambient exhausts all URLs, ready for the next session without manual intervention
+- **Persistent shuffle** — the shuffled play order survives bot restarts and crashes; the bot resumes exactly where it left off without re-randomising
+- **Automatic pool reload** — pool replenishes itself after the full list is exhausted, ready for the next session without manual intervention
 - `/skip` is universal — works regardless of whether the current track originated from a user request, jukebox playlist, or ambient trigger
 
 ---
@@ -120,7 +121,8 @@ CLIENT_ID=your_application_id_here  # Developer Portal > General Information > A
 
 # Jukebox — Google Sheets Integration:
 GOOGLE_SERVICE_ACCOUNT_JSON=./service-account.json
-GOOGLE_SHEET_ID=your_sheet_id_here  # The long ID in your sheet's URL
+GOOGLE_SHEET_ID=your_sheet_id_here        # Collaborative sheet shared with your members
+GOOGLE_STATE_SHEET_ID=your_state_sheet_id_here  # Private sheet — do not share with anyone
 ```
 
 To get your **Server ID**: in Discord, enable Developer Mode (User Settings → Advanced → Developer Mode), then right-click your server icon → **Copy Server ID**.
@@ -129,6 +131,11 @@ To get your **Sheet ID**: it's the string between `/d/` and `/edit` in your Goog
  
 ### 3. Google Sheets Setup *(branch: welcome-jukebox only)*
  
+The jukebox uses two separate Google Sheets:
+
+- **Collaborative sheet** (`GOOGLE_SHEET_ID`) — shared with your members; contains the URL pool in column A
+- **State sheet** (`GOOGLE_STATE_SHEET_ID`) — private, never shared; stores the shuffled play order and consumed tracking so the bot can resume across restarts
+
 The jukebox reads URLs from a Google Sheet using a service account. If you already have a `service_account.json` from a previous Google API project (e.g. from a Python gspread setup), you can reuse it directly — copy it to the project root as `service-account.json` and skip to step 5.
  
 Otherwise:
@@ -138,10 +145,14 @@ Otherwise:
 3. Go to **IAM & Admin → Service Accounts → Create Service Account**
 4. On the service account page → **Keys → Add Key → JSON** — download the file
 5. Save it as `service-account.json` in the project root
-6. Open your Google Sheet → **Share** → paste the service account email → Viewer access is sufficient
-7. Add `service-account.json` to `.gitignore`
+6. Open your `service-account.json` and copy the `client_email` value
+7. Share the **collaborative sheet** with that email → **Viewer** access is sufficient
+8. Create a second blank Google Sheet for state — **do not share it with anyone**; share it with the same service account email → **Editor** access required
+9. Add `service-account.json` to `.gitignore`
 
-The sheet should have YouTube URLs in column A, one per row. Any member can add links at any time — use `/jukebox update` to merge new entries into the active pool.
+The collaborative sheet should have YouTube URLs in column A, one per row. Any member can add links at any time — use `/jukebox update` to merge new entries into the active pool.
+
+The state sheet is managed entirely by the bot. Its contents are intentionally opaque — this is by design, to preserve the jukebox experience.
 
 ### 4. Register slash commands
 
@@ -212,11 +223,11 @@ or for windows: add a task in the **task scheduler**.
  
 | Command | Description |
 |---|---|
-| `/jukebox enable` | Activate ambient mode — bot auto-joins when anyone enters a voice channel and plays one random track from the pool. Enabled is the default. |
+| `/jukebox enable` | Activate ambient mode — bot auto-joins when anyone enters a voice channel and plays the next track from the shuffled pool. Enabled is the default. |
 | `/jukebox disable` | Deactivate ambient mode. Does not affect a running playlist. |
-| `/jukebox playlist` | Queue the entire remaining URL pool in random order. Always reloads fresh from the sheet before queueing. |
+| `/jukebox playlist` | Queue the entire remaining pool in its current shuffle order. |
 | `/jukebox stop` | Stop jukebox playback and clear the jukebox queue. User-requested tracks continue unaffected. |
-| `/jukebox update` | Merge new URLs from the Google Sheet into the active pool, skipping already-consumed URLs. |
+| `/jukebox update` | Merge new URLs from the Google Sheet into the active pool, skipping already-consumed URLs. New entries are shuffled and appended after the existing queue. |
  
 ---
  
@@ -229,8 +240,10 @@ or for windows: add a task in the **task scheduler**.
 **Queue priority:** user requests via `/play` always take priority over jukebox tracks. If `/play` is called while a jukebox track is playing, the requested track is injected at the front of the user queue and plays immediately after the current track finishes. Once the user queue drains, jukebox playback resumes automatically.
  
 **`/jukebox stop`** clears the jukebox queue and stops the current track only if it is jukebox-originated. If a user-requested track is currently playing, it finishes uninterrupted.
- 
-**Pool reload:** after a playlist drains completely or the bot leaves mid-playlist, the pool is automatically reloaded from the sheet. No manual `/jukebox update` needed to start a new session.
+
+**Persistent shuffle:** the bot shuffles the full URL pool once using a Fisher-Yates algorithm and writes the ordered sequence to the private state sheet. Each track played is marked consumed. On restart, the bot resumes from where it left off — no re-randomisation, no replaying recently heard tracks. The shuffle only resets when the entire pool has been exhausted.
+
+**Pool reload:** once every URL in the pool has been played, the bot automatically fetches the sheet fresh, generates a new shuffle, and persists it. No manual `/jukebox update` is needed to start a new cycle.
  
 ---
 
@@ -246,6 +259,12 @@ This resolves ~80% of breakage scenarios. The bot code does not need to change f
 
 ### When you update bot code
 ```bash
+npm run build
+pm2 restart music-bot
+```
+
+### If the code changes include new commands
+```bash
 npm run deploy
 ```
 
@@ -253,6 +272,7 @@ npm run deploy
 ```bash
 pm2 restart music-bot             # restart after changes
 pm2 stop music-bot                # stop without removing
+pm2 logs music-bot                # tail live logs
 ```
 
 ### Age-restricted or login-required content
