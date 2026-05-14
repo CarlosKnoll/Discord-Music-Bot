@@ -65,7 +65,7 @@ async function playNext(guildId: string): Promise<void> {
   cancelIdleLeave(guildId);
   state.mode = next.origin === 'jukebox' ? 'jukebox' : 'queue';
   const ready = await ensureStreamUrl(next);
-  const { resource, ffmpeg } = createStream(ready.streamUrl, state.volume);
+  const { resource, ffmpeg } = await createStream(ready.streamUrl, state.volume);
   state.currentTrack = ready;
   state.currentFfmpeg = ffmpeg;
   state.player.play(resource);
@@ -154,7 +154,7 @@ export async function enqueue(
   if (isIdle) {
     state.mode = target === 'jukebox' ? 'jukebox' : 'queue';
     const ready = await ensureStreamUrl(track);
-    const { resource, ffmpeg } = createStream(ready.streamUrl, state.volume);
+    const { resource, ffmpeg } = await createStream(ready.streamUrl, state.volume);
     state.currentTrack = ready;
     state.currentFfmpeg = ffmpeg;
     state.player.play(resource);

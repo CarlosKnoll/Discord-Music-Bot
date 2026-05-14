@@ -8,8 +8,12 @@ export interface TrackInfo {
   thumbnail: string;
   requestedBy: string;
   prefetched?: boolean;
-  origin?: 'user' | 'jukebox';  // ← add this
+  origin?: 'user' | 'jukebox';
 }
+
+const YTDLP_TIMEOUT_MS = 30_000; // 30 s — enough headroom under heavy host load
+const YTDLP_MAX_RETRIES = 2;     // total attempts = 3
+const YTDLP_RETRY_DELAY_MS = 2_000;
 
 // Resolves a YouTube URL or search query into a TrackInfo object
 export async function resolve(input: string, requestedBy: string): Promise<TrackInfo> {
@@ -17,9 +21,45 @@ export async function resolve(input: string, requestedBy: string): Promise<Track
   const cleaned = isUrl ? stripPlaylist(input) : input;
   const query = isUrl ? cleaned : `ytsearch1:${input}`;
 
-  // Reject if yt-dlp takes longer than 15 seconds
+  let lastError: Error | undefined;
+
+  for (let attempt = 0; attempt <= YTDLP_MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      await new Promise(r => setTimeout(r, YTDLP_RETRY_DELAY_MS));
+      console.warn(`[yt-dlp] Retry ${attempt}/${YTDLP_MAX_RETRIES} for: ${input}`);
+    }
+
+    try {
+      const data = await resolveOnce(query);
+      if (!data) throw new Error(`No results found for: ${input}`);
+
+      const streamUrl = extractStreamUrl(data);
+
+      return {
+        title: data.title,
+        url: data.webpage_url ?? data.url,
+        streamUrl,
+        duration: data.duration ?? 0,
+        thumbnail: data.thumbnail ?? '',
+        requestedBy,
+        prefetched: false,
+      };
+    } catch (err: any) {
+      lastError = err;
+      // Only retry on timeout; hard errors (no results, bad URL) fail immediately
+      if (!err.message?.includes('timed out')) throw err;
+    }
+  }
+
+  throw lastError;
+}
+
+async function resolveOnce(query: string): Promise<any> {
   const timeout = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error('yt-dlp timed out after 15 seconds')), 15_000)
+    setTimeout(
+      () => reject(new Error(`yt-dlp timed out after ${YTDLP_TIMEOUT_MS / 1000} seconds`)),
+      YTDLP_TIMEOUT_MS
+    )
   );
 
   const info = await Promise.race([
@@ -35,44 +75,25 @@ export async function resolve(input: string, requestedBy: string): Promise<Track
     timeout,
   ]) as any;
 
-  const data = info.entries ? info.entries[0] : info;
-
-  if (!data) {
-    throw new Error(`No results found for: ${input}`);
-  }
-
-  const streamUrl = extractStreamUrl(data);
-
-  return {
-    title: data.title,
-    url: data.webpage_url ?? data.url,
-    streamUrl,
-    duration: data.duration ?? 0,
-    thumbnail: data.thumbnail ?? '',
-    requestedBy,
-    prefetched: false,
-  };
+  return info.entries ? info.entries[0] : info;
 }
 
 // Picks the best audio-only stream URL from yt-dlp's format list
 function extractStreamUrl(data: any): string {
-  // If yt-dlp already resolved a single best URL, use it
   if (data.url && !data.formats) {
     return data.url;
   }
 
-  // Otherwise pick the best audio-only format manually
   const formats: any[] = data.formats ?? [];
 
   const audioOnly = formats
     .filter(f => f.acodec !== 'none' && f.vcodec === 'none')
-    .sort((a, b) => (b.abr ?? 0) - (a.abr ?? 0));  // sort by bitrate descending
+    .sort((a, b) => (b.abr ?? 0) - (a.abr ?? 0));
 
   if (audioOnly.length > 0) {
     return audioOnly[0].url;
   }
 
-  // Fallback: just use whatever yt-dlp picked as best
   return data.url;
 }
 
@@ -97,7 +118,7 @@ export function stripPlaylist(url: string): string {
     u.searchParams.delete('index');
     return u.toString();
   } catch {
-    return url; // not a valid URL, return as-is
+    return url;
   }
 }
 
@@ -110,7 +131,7 @@ export async function resolvePlaylist(
   const info = await ytdlp(url, {
     dumpSingleJson: true,
     noWarnings: true,
-    flatPlaylist: true,       // metadata only, no stream URL resolution per entry
+    flatPlaylist: true,
     format: 'bestaudio/best',
     jsRuntimes: 'node',
     remoteComponents: 'ejs:github',
@@ -123,7 +144,7 @@ export async function resolvePlaylist(
   return info.entries.map((entry: any) => ({
     title: entry.title ?? 'Unknown',
     url: `https://www.youtube.com/watch?v=${entry.id}`,
-    streamUrl: '',       // empty — will be resolved by prefetch or playNext
+    streamUrl: '',
     duration: entry.duration ?? 0,
     thumbnail: entry.thumbnail ?? entry.thumbnails?.[0]?.url ?? '',
     requestedBy,
