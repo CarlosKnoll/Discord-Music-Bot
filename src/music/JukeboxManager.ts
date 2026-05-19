@@ -216,27 +216,67 @@ export async function loadPool(guildId: string): Promise<number> {
 }
 
 /**
- * Merges new URLs from the sheet into the active pool without disrupting
- * the current shuffle order. New entries are appended after existing ones
- * (not interleaved), then state is persisted.
+ * Merges new URLs from the sheet into the active pool and re-shuffles them
+ * together with the remaining unconsumed entries (so new songs don't cluster
+ * at the end). If a playlist is currently active (pool already drained into
+ * jukeboxQueue), the new tracks are also appended to the live queue as
+ * placeholders so they play without requiring a restart.
+ *
+ * Returns { added, injected } where:
+ *   added    = number of new URLs merged into the pool / state sheet
+ *   injected = number of placeholder tracks pushed into jukeboxQueue (0 if
+ *              no playlist was running)
  */
-export async function updatePool(guildId: string): Promise<number> {
+export async function updatePool(
+  guildId: string,
+  musicState?: { jukeboxQueue: TrackInfo[] } | null,
+): Promise<{ added: number; injected: number }> {
   const state = getOrCreate(guildId);
   const fresh = await fetchFromSheet();
   const existing = new Set([...state.pool, ...state.consumed]);
   const newEntries = fresh.filter(u => !existing.has(u));
 
-  // Shuffle just the new batch before appending so they're not in
-  // sheet-insertion order relative to each other.
-  shuffleInPlace(newEntries);
-  state.pool.push(...newEntries);
+  if (newEntries.length === 0) {
+    return { added: 0, injected: 0 };
+  }
+
+  // Merge new URLs into the remaining pool and re-shuffle the combined set
+  // so new songs are distributed throughout, not appended in a block.
+  state.pool = shuffleInPlace([...state.pool, ...newEntries]);
 
   writeState(guildId, state.pool, state.consumed).catch(err =>
     console.warn(`[JukeboxState:${guildId}] State write after update failed:`, err)
   );
 
-  console.log(`[Jukebox:${guildId}] Pool updated: +${newEntries.length} new URLs. Pool: ${state.pool.length}`);
-  return newEntries.length;
+  console.log(
+    `[Jukebox:${guildId}] Pool updated: +${newEntries.length} new URLs. ` +
+    `Pool: ${state.pool.length} (re-shuffled with existing).`
+  );
+
+  // If a playlist is active the pool has already been drained into jukeboxQueue.
+  // Append the new tracks there as placeholders so they actually play.
+  let injected = 0;
+  if (musicState && isPlaylistActive(guildId)) {
+    const queueLength = musicState.jukeboxQueue.length;
+    for (const url of newEntries) {
+      injected++;
+      musicState.jukeboxQueue.push({
+        title: `Track (novo) ${injected}`,
+        url,
+        streamUrl: '',
+        duration: 0,
+        thumbnail: '',
+        requestedBy: 'Jukebox',
+        origin: 'jukebox',
+        prefetched: false,
+      });
+      console.log(
+        `[Jukebox:${guildId}] Playlist ativa — injetado na fila (pos ${queueLength + injected}): ${url}`
+      );
+    }
+  }
+
+  return { added: newEntries.length, injected };
 }
 
 /**
@@ -367,25 +407,56 @@ export function setPlaylistActive(guildId: string, value: boolean): void {
   getOrCreate(guildId).playlistActive = value;
 }
 
-export async function enrichQueue(queue: TrackInfo[]): Promise<void> {
+/**
+ * Enriches placeholder queue entries with real titles/durations by resolving
+ * their URLs in small batches (to avoid hammering yt-dlp). Patches entries
+ * in-place so the live queue always reflects the latest metadata.
+ *
+ * @param queue     The jukeboxQueue array to enrich (mutated in place)
+ * @param guildId   For log prefixes
+ * @param total     Total track count for log context (e.g. "[3/64]")
+ */
+export async function enrichQueue(
+  queue: TrackInfo[],
+  guildId: string,
+  total: number,
+): Promise<void> {
   const BATCH_SIZE = 3;
+  let enriched = 0;
+  let failed = 0;
 
   for (let i = 0; i < queue.length; i += BATCH_SIZE) {
     const batch = queue.slice(i, i + BATCH_SIZE);
     await Promise.all(
-      batch.map(async (track) => {
-        if (!track.title.startsWith('Track ')) return;
+      batch.map(async (track, batchIdx) => {
+        // Queue position is i + batchIdx + 2 (1-based, +1 because track[0] was the
+        // already-resolved first track that never entered jukeboxQueue as a placeholder)
+        const pos = i + batchIdx + 2;
+        if (!track.title.startsWith('Track ')) return; // already enriched
         try {
           const fresh = await resolve(track.url, track.requestedBy);
-          track.title = fresh.title;
-          track.duration = fresh.duration;
+          track.title     = fresh.title;
+          track.duration  = fresh.duration;
           track.thumbnail = fresh.thumbnail;
           track.streamUrl = fresh.streamUrl;
           track.prefetched = true;
+          enriched++;
+          console.log(
+            `[Jukebox:${guildId}] [${pos}/${total}] ✅ Enriquecido: "${fresh.title}" ` +
+            `(${fresh.duration}s) — ${track.url}`
+          );
         } catch (err) {
-          console.warn(`[Jukebox] Failed to enrich ${track.url}: ${err}`);
+          failed++;
+          console.warn(
+            `[Jukebox:${guildId}] [${pos}/${total}] ❌ Falha ao enriquecer: ${track.url} — ${err}`
+          );
         }
       })
     );
   }
+
+  console.log(
+    `[Jukebox:${guildId}] Enriquecimento concluído: ` +
+    `${enriched} ✅ / ${failed} ❌ de ${queue.length} faixas.`
+  );
 }

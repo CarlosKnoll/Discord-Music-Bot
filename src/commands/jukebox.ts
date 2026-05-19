@@ -9,6 +9,7 @@ import {
   isAmbientEnabled,
   drainPool,
   loadPool,
+  silentReload,
   isPlaylistActive,
   setPlaylistActive,
 } from '../music/JukeboxManager';
@@ -38,7 +39,12 @@ export const jukeboxCommand = {
     .addSubcommand(sub =>
       sub
         .setName('playlist')
-        .setDescription('Enfileira todo o pool de URLs em ordem aleatória')
+        .setDescription('Enfileira as músicas restantes (não tocadas) da pool em ordem aleatória')
+    )
+    .addSubcommand(sub =>
+      sub
+        .setName('playlist-full')
+        .setDescription('Enfileira TODAS as músicas da planilha (incluindo já tocadas) em nova ordem aleatória')
     )
     .addSubcommand(sub =>
       sub
@@ -91,16 +97,19 @@ export const jukeboxCommand = {
     if (sub === 'update') {
       await interaction.deferReply();
       try {
-        const added = await updatePool(guildId);
+        const { added, injected } = await updatePool(guildId, getState(guildId));
         const total = getPoolSize(guildId);
         if (added === 0) {
           await interaction.editReply('❌ Nenhuma nova URL encontrada na planilha.');
           return;
         }
-        await interaction.editReply(
+        let reply =
           `✅ Adicionadas **${added}** novas URLs ao pool. ` +
-          `Pool agora tem **${total}** faixa${total !== 1 ? 's' : ''}.`
-        );
+          `Pool agora tem **${total}** faixa${total !== 1 ? 's' : ''}.`;
+        if (injected > 0) {
+          reply += `\n➕ **${injected}** faixas também adicionadas diretamente à fila da jukebox (playlist em andamento).`;
+        }
+        await interaction.editReply(reply);
       } catch (err) {
         console.error('[Jukebox] Update failed:', err);
         await interaction.editReply('❌ Falha ao buscar na planilha do Google. Verifique os logs para detalhes.');
@@ -108,7 +117,7 @@ export const jukeboxCommand = {
       return;
     }
 
-    if (sub === 'playlist') {
+    if (sub === 'playlist' || sub === 'playlist-full') {
       await interaction.deferReply();
 
       const member = interaction.member as GuildMember;
@@ -124,46 +133,66 @@ export const jukeboxCommand = {
         return;
       }
 
-      await loadPool(guildId);
+      const isFull = sub === 'playlist-full';
+
+      // 'full': discard consumed history and generate a completely fresh shuffle.
+      // 'remaining': only reload from sheet/state if the pool is currently empty.
+      if (isFull) {
+        await silentReload(guildId);
+      } else if (getPoolSize(guildId) === 0) {
+        await loadPool(guildId);
+      }
 
       const poolSize = getPoolSize(guildId);
       if (poolSize === 0) {
-        await interaction.editReply(
-          '❌ Nenhuma URL encontrada na planilha.'
-        );
+        await interaction.editReply('❌ Nenhuma URL encontrada na planilha.');
         return;
       }
 
       await joinChannel(interaction.guild!, voiceChannel);
 
-      // Capture currently playing jukebox track URL before reload
+      // Capture currently playing jukebox track to avoid re-queueing it
       const state = getState(guildId);
       const currentUrl = state?.currentTrack?.origin === 'jukebox'
         ? state.currentTrack.url
         : null;
 
-      await loadPool(guildId);
-
-      // Drain pool, excluding currently playing track to avoid duplication
+      // Single drain — no second loadPool call that would reset to stale state
       const urls = drainPool(guildId).filter(u => u !== currentUrl);
+
+      if (urls.length === 0) {
+        await interaction.editReply('❌ Nenhuma faixa disponível para enfileirar.');
+        return;
+      }
+
       setPlaylistActive(guildId, true);
 
-      // Resolve and play the first track immediately
+      const modeLabel = isFull ? 'completa' : 'faixas restantes';
+      console.log(
+        `[Jukebox:${guildId}] Playlist (${modeLabel}) iniciada — ` +
+        `${urls.length} faixas para enfileirar.`
+      );
+
+      // Resolve and enqueue the first track immediately so playback starts without delay
+      console.log(`[Jukebox:${guildId}] [1/${urls.length}] Resolvendo: ${urls[0]}`);
       const first = await resolve(urls[0], 'Jukebox');
       first.origin = 'jukebox';
       const status = await enqueue(guildId, first, 'jukebox');
+      console.log(
+        `[Jukebox:${guildId}] [1/${urls.length}] ✅ "${first.title}" ` +
+        `(${formatDuration(first.duration)}) → ${status}`
+      );
 
       await interaction.editReply(
-        `🎲 Playlist da jukebox iniciada — **${urls.length} faixas** enfileiradas.\n` +
+        `🎲 Playlist da jukebox iniciada (${isFull ? '**completa**' : '**faixas restantes**'}) — **${urls.length} faixas** a tocar.\n` +
         `${status === 'playing' ? '▶️ Tocando' : '➕ Próxima'}: **${first.title}** ` +
         `(${formatDuration(first.duration)})\n` +
         `Enfileirando o restante em segundo plano…`
       );
 
-      // Push remaining tracks directly into jukeboxQueue without resolving stream URLs
-      // ensureStreamUrl + prefetchNext handle lazy resolution as each track plays
+      // Push remaining tracks as unresolved placeholders — stream URLs are resolved
+      // lazily by ensureStreamUrl/prefetchNext as each track is about to play.
       if (state) {
-        // Push remaining tracks as placeholders
         for (let i = 1; i < urls.length; i++) {
           state.jukeboxQueue.push({
             title: `Track ${i + 1}`,
@@ -175,18 +204,20 @@ export const jukeboxCommand = {
             origin: 'jukebox',
             prefetched: false,
           });
+          console.log(`[Jukebox:${guildId}] [${i + 1}/${urls.length}] Placeholder: ${urls[i]}`);
         }
 
-        // Enrich titles in background — patches queue entries in place
+        // Enrich titles/durations in background (small batches to avoid yt-dlp overload).
+        // guildId and total are threaded through so enrichQueue can log per-track results.
         import('../music/JukeboxManager').then(({ enrichQueue }) => {
-          enrichQueue(state.jukeboxQueue).catch(err =>
-            console.warn('[Jukebox] Enrichment failed:', err)
+          enrichQueue(state.jukeboxQueue, guildId, urls.length).catch(err =>
+            console.warn(`[Jukebox:${guildId}] Enriquecimento de fila falhou globalmente:`, err)
           );
         });
       }
 
       await interaction.followUp({
-        content: `✅ Todas as **${urls.length - 1}** faixas restantes foram enfileiradas.`,
+        content: `✅ **${urls.length - 1}** faixas enfileiradas como placeholders — metadados serão resolvidos conforme tocam.`,
         ephemeral: false,
       });
 
