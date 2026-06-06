@@ -12,8 +12,10 @@ import {
   silentReload,
   isPlaylistActive,
   setPlaylistActive,
+  triggerAmbient,
+  pickRandom,
 } from '../music/JukeboxManager';
-import { joinChannel, enqueue, getState, stop, clearJukeboxQueue, getQueueLengths } from '../music/MusicManager';
+import { joinChannel, enqueue, getState, stop, clearJukeboxQueue, getQueueLengths, isActive } from '../music/MusicManager';
 import { resolve, formatDuration } from '../music/YtdlpExtractor';
 import { GuildMember } from 'discord.js';
 
@@ -35,6 +37,11 @@ export const jukeboxCommand = {
       sub
         .setName('update')
         .setDescription('Juntar novas URLs da planilha do Google na pool ativa')
+    )
+    .addSubcommand(sub =>
+      sub
+        .setName('play')
+        .setDescription('Aciona a jukebox manualmente para tocar a próxima faixa.')
     )
     .addSubcommand(sub =>
       sub
@@ -250,6 +257,50 @@ export const jukeboxCommand = {
         );
       } else {
         await interaction.editReply('⏹️ Jukebox interrompida. Bot ficará ocioso.');
+      }
+      return;
+    }
+
+    if (sub === 'play') {
+      const member = interaction.member as GuildMember;
+      const voiceChannel = member.voice?.channel;
+
+      if (!voiceChannel) {
+        await interaction.reply({ content: '❌ Você precisa estar em um canal de voz para usar isso.', ephemeral: true });
+        return;
+      }
+
+      await interaction.deferReply({ ephemeral: true });
+
+      if (!isActive(guildId)) {
+        // Bot is idle — full ambient path: join, pick, play.
+        await triggerAmbient(interaction.guild!, voiceChannel);
+        await interaction.editReply('▶️ Tocando a próxima faixa da jukebox.');
+      } else {
+        // Bot already active — enqueue behind the user queue.
+        if (getPoolSize(guildId) === 0) {
+          try {
+            await loadPool(guildId);
+          } catch (err) {
+            console.error(`[Jukebox:${guildId}] Pool reload failed on /jukebox play:`, err);
+            await interaction.editReply('❌ A pool está vazia e não foi possível recarregar da planilha. Verifique os logs.');
+            return;
+          }
+        }
+        const url = pickRandom(guildId);
+        if (!url) {
+          await interaction.editReply('❌ A pool da jukebox está vazia mesmo após tentativa de recarga.');
+          return;
+        }
+        const track = await resolve(url, 'Jukebox');
+        track.origin = 'jukebox';
+        await enqueue(guildId, track, 'jukebox');
+        const lengths = getQueueLengths(guildId);
+        await interaction.editReply(
+          lengths.user > 0
+            ? `✅ Enfileirada como próxima faixa da jukebox — toca após a fila do usuário (${lengths.user} faixa${lengths.user !== 1 ? 's' : ''}).`
+            : `✅ Enfileirada como próxima faixa da jukebox.`
+        );
       }
       return;
     }

@@ -11,14 +11,31 @@ export interface AudioStreamResult {
   ffmpeg: ReturnType<typeof spawn>;
 }
 
+// Number of PCM chunks to buffer before handing the stream to Discord.
+// Each chunk is typically 4096 bytes; at 48kHz s16le stereo that's ~21ms per
+// chunk, so 10 chunks ≈ 200ms of headroom to absorb TLS reconnect hiccups
+// without producing audible skips.
+const BUFFER_CHUNKS = 10;
+
 export function createStream(streamUrl: string, volume: number = 1.0): Promise<AudioStreamResult> {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const settle = (fn: () => void) => {
+      if (!settled) {
+        settled = true;
+        fn();
+      }
+    };
+
     const ffmpegArgs = [
       '-reconnect', '1',
       '-reconnect_streamed', '1',
+      '-reconnect_at_eof', '1',
       '-reconnect_on_network_error', '1',
       '-reconnect_on_http_error', '4xx,5xx',
       '-reconnect_delay_max', '10',
+      '-probesize', '32768',
+      '-analyzeduration', '0',
       '-i', streamUrl,
       '-af', `dynaudnorm=g=5:f=250:r=0.9:p=0.7,volume=${volume}`,
       '-vn',
@@ -43,48 +60,52 @@ export function createStream(streamUrl: string, volume: number = 1.0): Promise<A
 
     ffmpeg.on('error', (err) => {
       console.error('[FFmpeg] Failed to spawn process:', err.message);
-      reject(err);
+      settle(() => reject(err));
     });
 
     ffmpeg.on('close', (code) => {
       if (code !== 0 && code !== null && code !== 255) {
         console.warn(`[FFmpeg] Exited with code ${code}`);
+        settle(() => reject(new Error(`FFmpeg exited with code ${code}`)));
       }
     });
 
-    // Wait for the first real PCM chunk before handing the stream to Discord.
-    // Without this, @discordjs/voice starts consuming the resource while FFmpeg
-    // is still establishing the connection, causing its playback clock to advance
-    // by 2-3 seconds before audio data actually arrives.
     const stdout = ffmpeg.stdout as Readable;
+    const buffered: Buffer[] = [];
 
-    const onFirstData = () => {
-      stdout.removeListener('data', onFirstData);
+    const onData = (chunk: Buffer) => {
+      buffered.push(chunk);
+      if (buffered.length < BUFFER_CHUNKS) return;
+
+      stdout.removeListener('data', onData);
       stdout.removeListener('error', onError);
-
-      // Unshift the chunk back so it isn't lost — pause() then push() is cleaner
-      // but Readable in flowing mode doesn't allow unshift; instead we simply
-      // re-pause and let createAudioResource re-attach its own reader.
       stdout.pause();
 
-      const resource = createAudioResource(stdout, {
+      // Combine buffered chunks and prepend them to a pass-through Readable so
+      // createAudioResource sees a continuous stream starting from the first byte.
+      const combined = Buffer.concat(buffered);
+      const readable = new Readable({ read() {} });
+      readable.push(combined);
+      stdout.on('data', (c: Buffer) => readable.push(c));
+      stdout.on('end', () => readable.push(null));
+      stdout.on('error', (e: Error) => readable.destroy(e));
+      stdout.resume();
+
+      const resource = createAudioResource(readable, {
         inputType: StreamType.Raw,
         inlineVolume: true,
       });
 
-      if (resource.volume) {
-        resource.volume.setVolume(volume);
-      }
-
-      resolve({ resource, ffmpeg });
+      resource.volume?.setVolume(volume);
+      settle(() => resolve({ resource, ffmpeg }));
     };
 
     const onError = (err: Error) => {
-      stdout.removeListener('data', onFirstData);
-      reject(err);
+      stdout.removeListener('data', onData);
+      settle(() => reject(err));
     };
 
-    stdout.once('data', onFirstData);
+    stdout.on('data', onData);
     stdout.once('error', onError);
   });
 }

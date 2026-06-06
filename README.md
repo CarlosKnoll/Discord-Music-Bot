@@ -225,6 +225,7 @@ or for windows: add a task in the **task scheduler**.
 |---|---|
 | `/jukebox enable` | Activate ambient mode — bot auto-joins when anyone enters a voice channel and plays the next track from the shuffled pool. Enabled is the default. |
 | `/jukebox disable` | Deactivate ambient mode. Does not affect a running playlist. |
+| `/jukebox play` | Manually trigger the next jukebox track in your current voice channel — identical to ambient mode firing, but on demand. |
 | `/jukebox playlist` | Queue the entire remaining pool in its current shuffle order. |
 | `/jukebox stop` | Stop jukebox playback and clear the jukebox queue. User-requested tracks continue unaffected. |
 | `/jukebox update` | Merge new URLs from the Google Sheet into the active pool, skipping already-consumed URLs. New entries are shuffled and appended after the existing queue. |
@@ -239,6 +240,8 @@ or for windows: add a task in the **task scheduler**.
  
 **Queue priority:** user requests via `/play` always take priority over jukebox tracks. If `/play` is called while a jukebox track is playing, the requested track is injected at the front of the user queue and plays immediately after the current track finishes. Once the user queue drains, jukebox playback resumes automatically.
  
+**`/jukebox play`** is a manual ambient trigger. If the bot is idle, it behaves identically to ambient mode: joins your voice channel and plays the next track from the shuffled pool immediately. If the bot is already active, it enqueues the next pool track into the jukebox queue instead — it will play once the current user queue drains, consistent with the existing priority system. Requires the caller to be in a voice channel. If the pool is empty, it attempts a reload from the sheet before playing.
+
 **`/jukebox stop`** clears the jukebox queue and stops the current track only if it is jukebox-originated. If a user-requested track is currently playing, it finishes uninterrupted.
 
 **Persistent shuffle:** the bot shuffles the full URL pool once using a Fisher-Yates algorithm and writes the ordered sequence to the private state sheet. Each track played is marked consumed. On restart, the bot resumes from where it left off — no re-randomisation, no replaying recently heard tracks. The shuffle only resets when the entire pool has been exhausted.
