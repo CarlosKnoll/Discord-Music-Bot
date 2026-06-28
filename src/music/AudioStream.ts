@@ -17,7 +17,7 @@ export interface AudioStreamResult {
 // without producing audible skips.
 const BUFFER_CHUNKS = 10;
 
-export function createStream(streamUrl: string, volume: number = 1.0): Promise<AudioStreamResult> {
+export function createStream(streamUrl: string, volume: number = 1.0, streamHeaders?: Record<string, string>): Promise<AudioStreamResult> {
   return new Promise((resolve, reject) => {
     let settled = false;
     const settle = (fn: () => void) => {
@@ -26,6 +26,16 @@ export function createStream(streamUrl: string, volume: number = 1.0): Promise<A
         fn();
       }
     };
+
+    // ffmpeg's -headers flag wants a single CRLF-joined string, terminated
+    // with a trailing CRLF.
+    const headerArgs: string[] = [];
+    if (streamHeaders && Object.keys(streamHeaders).length > 0) {
+      const headerBlob = Object.entries(streamHeaders)
+        .map(([k, v]) => `${k}: ${v}`)
+        .join('\r\n') + '\r\n';
+      headerArgs.push('-headers', headerBlob);
+    }
 
     const ffmpegArgs = [
       '-reconnect', '1',

@@ -4,6 +4,7 @@ export interface TrackInfo {
   title: string;
   url: string;
   streamUrl: string;
+  streamHeaders?: Record<string, string>;
   duration: number;
   thumbnail: string;
   requestedBy: string;
@@ -33,12 +34,13 @@ export async function resolve(input: string, requestedBy: string): Promise<Track
       const data = await resolveOnce(query);
       if (!data) throw new Error(`No results found for: ${input}`);
 
-      const streamUrl = extractStreamUrl(data);
+      const { url: streamUrl, headers: streamHeaders} = extractStreamFormat(data);
 
       return {
         title: data.title,
         url: data.webpage_url ?? data.url,
         streamUrl,
+        streamHeaders,
         duration: data.duration ?? 0,
         thumbnail: data.thumbnail ?? '',
         requestedBy,
@@ -78,10 +80,13 @@ async function resolveOnce(query: string): Promise<any> {
   return info.entries ? info.entries[0] : info;
 }
 
-// Picks the best audio-only stream URL from yt-dlp's format list
-function extractStreamUrl(data: any): string {
+// Picks the best audio-only stream URL (+ its required HTTP headers) from
+// yt-dlp's format list. The headers matter: googlevideo.com signs URLs to
+// the request context yt-dlp used (UA, referer, sometimes cookies), and a
+// bare URL handed to ffmpeg without them gets 403'd.
+function extractStreamFormat(data: any): { url: string; headers?: Record<string, string> } {
   if (data.url && !data.formats) {
-    return data.url;
+    return { url: data.url, headers: data.http_headers };
   }
 
   const formats: any[] = data.formats ?? [];
@@ -91,10 +96,10 @@ function extractStreamUrl(data: any): string {
     .sort((a, b) => (b.abr ?? 0) - (a.abr ?? 0));
 
   if (audioOnly.length > 0) {
-    return audioOnly[0].url;
+    return { url: audioOnly[0].url, headers: audioOnly[0].http_headers ?? data.http_headers };
   }
 
-  return data.url;
+  return { url: data.url, headers: data.http_headers };
 }
 
 // Formats seconds into mm:ss or hh:mm:ss for display
